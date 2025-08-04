@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { Plus, MapPin, Calendar, Users, DollarSign, Edit2, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, MapPin, Calendar, Users, DollarSign, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import axios from "@/api/axiosInstance";
 
 interface TripData {
+  tripId?: number; // Ensure tripId is optional
   destination: string;
   startDate: string;
   endDate: string;
@@ -21,6 +23,7 @@ interface DayActivity {
   location: string;
   notes?: string;
   estimatedCost?: number;
+  date?: string; // Needed for grouping on fetch
 }
 
 interface DayPlan {
@@ -39,78 +42,130 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
   });
   const [selectedDate, setSelectedDate] = useState("");
 
-  // Generate date range
   const generateDateRange = () => {
     const start = new Date(tripData.startDate);
     const end = new Date(tripData.endDate);
     const dates = [];
-    
+
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      dates.push(new Date(d).toISOString().split('T')[0]);
+      dates.push(new Date(d).toISOString().split("T")[0]);
     }
     return dates;
   };
 
   const dates = generateDateRange();
 
-  const addActivity = () => {
-    if (!selectedDate || !newActivity.activity) return;
+  useEffect(() => {
+    const fetchActivities = async () => {
+      if (!tripData?.tripId) return;
+      try {
+        const response = await axios.get(`http://localhost:1833/api/activities/${tripData.tripId}`);
+        const activities: DayActivity[] = response.data.activities;
 
-    const activity: DayActivity = {
-      id: Date.now().toString(),
-      time: newActivity.time,
-      activity: newActivity.activity,
-      location: newActivity.location,
-      notes: newActivity.notes,
-      estimatedCost: newActivity.estimatedCost ? parseFloat(newActivity.estimatedCost) : undefined
+        const groupedByDate: Record<string, DayActivity[]> = {};
+        activities.forEach((act) => {
+          if (!act.date) return;
+          if (!groupedByDate[act.date]) groupedByDate[act.date] = [];
+          groupedByDate[act.date].push(act);
+        });
+
+        const result: DayPlan[] = Object.keys(groupedByDate).map((date) => ({
+          date,
+          activities: groupedByDate[date]
+        }));
+
+        setItinerary(result);
+      } catch (err) {
+        console.error("Error loading activities:", err);
+      }
     };
 
-    setItinerary(prev => {
-      const existingDay = prev.find(day => day.date === selectedDate);
-      if (existingDay) {
-        return prev.map(day => 
-          day.date === selectedDate 
-            ? { ...day, activities: [...day.activities, activity] }
-            : day
-        );
-      } else {
-        return [...prev, { date: selectedDate, activities: [activity] }];
-      }
-    });
+    fetchActivities();
+  }, [tripData?.tripId]);
 
-    setNewActivity({
-      time: "",
-      activity: "",
-      location: "",
-      notes: "",
-      estimatedCost: ""
-    });
+  const addActivity = async () => {
+    if (!selectedDate || !newActivity.activity) return;
+
+    try {
+      const response = await axios.post("http://localhost:1833/api/activities", {
+        trip_id: tripData.tripId,
+        date: selectedDate,
+        time: newActivity.time,
+        activity: newActivity.activity,
+        location: newActivity.location,
+        notes: newActivity.notes,
+        estimated_cost: newActivity.estimatedCost ? parseFloat(newActivity.estimatedCost) : null
+      });
+
+      const activity: DayActivity = {
+        id: response.data.activityId,
+        ...newActivity,
+        estimatedCost: newActivity.estimatedCost ? parseFloat(newActivity.estimatedCost) : undefined
+      };
+
+      setItinerary((prev) => {
+        const existingDay = prev.find((day) => day.date === selectedDate);
+        if (existingDay) {
+          return prev.map((day) =>
+            day.date === selectedDate
+              ? { ...day, activities: [...day.activities, activity] }
+              : day
+          );
+        } else {
+          return [...prev, { date: selectedDate, activities: [activity] }];
+        }
+      });
+
+      setNewActivity({
+        time: "",
+        activity: "",
+        location: "",
+        notes: "",
+        estimatedCost: ""
+      });
+    } catch (err) {
+      console.error("Error adding activity:", err);
+    }
   };
 
-  const removeActivity = (date: string, activityId: string) => {
-    setItinerary(prev => 
-      prev.map(day => 
-        day.date === date 
-          ? { ...day, activities: day.activities.filter(a => a.id !== activityId) }
-          : day
-      ).filter(day => day.activities.length > 0)
-    );
+  const removeActivity = async (date: string, activityId: string) => {
+    try {
+      await axios.delete(`http://localhost:1833/api/activities/${activityId}`);
+
+      setItinerary((prev) =>
+        prev
+          .map((day) =>
+            day.date === date
+              ? {
+                  ...day,
+                  activities: day.activities.filter((a) => a.id !== activityId)
+                }
+              : day
+          )
+          .filter((day) => day.activities.length > 0)
+      );
+    } catch (err) {
+      console.error("Error removing activity:", err);
+    }
   };
 
   const getTotalCost = () => {
     return itinerary.reduce((total, day) => {
-      return total + day.activities.reduce((dayTotal, activity) => {
-        return dayTotal + (activity.estimatedCost || 0);
-      }, 0);
+      return (
+        total +
+        day.activities.reduce((dayTotal, activity) => {
+          return dayTotal + (activity.estimatedCost || 0);
+        }, 0)
+      );
     }, 0);
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+    return new Date(dateString).toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
     });
   };
 
@@ -149,7 +204,7 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
             </div>
             <div className="text-center">
               <div className="w-6 h-6 mx-auto mb-2 flex gap-1">
-                {tripData.transport.map(t => (
+                {tripData.transport.map((t) => (
                   <div key={t} className="w-2 h-6 bg-travel-orange rounded"></div>
                 ))}
               </div>
@@ -172,13 +227,13 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium">Date</label>
-              <select 
+              <select
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="w-full mt-1 px-3 py-2 border border-input rounded-md bg-background"
               >
                 <option value="">Select a date</option>
-                {dates.map(date => (
+                {dates.map((date) => (
                   <option key={date} value={date}>
                     {formatDate(date)}
                   </option>
@@ -190,19 +245,19 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
               <Input
                 type="time"
                 value={newActivity.time}
-                onChange={(e) => setNewActivity(prev => ({ ...prev, time: e.target.value }))}
+                onChange={(e) => setNewActivity((prev) => ({ ...prev, time: e.target.value }))}
                 className="mt-1"
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium">Activity</label>
               <Input
                 placeholder="What will you do?"
                 value={newActivity.activity}
-                onChange={(e) => setNewActivity(prev => ({ ...prev, activity: e.target.value }))}
+                onChange={(e) => setNewActivity((prev) => ({ ...prev, activity: e.target.value }))}
                 className="mt-1"
               />
             </div>
@@ -211,19 +266,19 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
               <Input
                 placeholder="Where?"
                 value={newActivity.location}
-                onChange={(e) => setNewActivity(prev => ({ ...prev, location: e.target.value }))}
+                onChange={(e) => setNewActivity((prev) => ({ ...prev, location: e.target.value }))}
                 className="mt-1"
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium">Notes (optional)</label>
               <Textarea
                 placeholder="Additional details..."
                 value={newActivity.notes}
-                onChange={(e) => setNewActivity(prev => ({ ...prev, notes: e.target.value }))}
+                onChange={(e) => setNewActivity((prev) => ({ ...prev, notes: e.target.value }))}
                 className="mt-1"
                 rows={2}
               />
@@ -234,14 +289,14 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
                 type="number"
                 placeholder="0"
                 value={newActivity.estimatedCost}
-                onChange={(e) => setNewActivity(prev => ({ ...prev, estimatedCost: e.target.value }))}
+                onChange={(e) => setNewActivity((prev) => ({ ...prev, estimatedCost: e.target.value }))}
                 className="mt-1"
               />
             </div>
           </div>
-          
-          <Button 
-            onClick={addActivity} 
+
+          <Button
+            onClick={addActivity}
             variant="travel"
             className="w-full"
             disabled={!selectedDate || !newActivity.activity}
@@ -254,7 +309,7 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
       {/* Itinerary Display */}
       <div className="space-y-4">
         <h3 className="text-xl font-semibold text-travel-blue">Your Itinerary</h3>
-        {itinerary.length === 0 ? (
+        {itinerary.length === 0 ? ( 
           <Card className="shadow-card-travel">
             <CardContent className="p-8 text-center">
               <Calendar className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
@@ -262,7 +317,7 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
             </CardContent>
           </Card>
         ) : (
-          itinerary.map(day => (
+          itinerary.map((day) => (
             <Card key={day.date} className="shadow-card-travel">
               <CardHeader>
                 <CardTitle className="text-lg text-travel-blue">
@@ -271,8 +326,11 @@ const TripPlanner = ({ tripData }: { tripData: TripData }) => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {day.activities.map(activity => (
-                    <div key={activity.id} className="flex items-start justify-between p-3 border rounded-lg bg-gradient-card">
+                  {day.activities.map((activity) => (
+                    <div
+                      key={activity.id}
+                      className="flex items-start justify-between p-3 border rounded-lg bg-gradient-card"
+                    >
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           {activity.time && (
