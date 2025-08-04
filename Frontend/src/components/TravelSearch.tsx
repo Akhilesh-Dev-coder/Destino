@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import axios from "@/api/axiosInstance";
 
 const TravelSearch = ({ onSearch }: { onSearch: (data: any) => void }) => {
   const [destination, setDestination] = useState("");
@@ -19,21 +20,41 @@ const TravelSearch = ({ onSearch }: { onSearch: (data: any) => void }) => {
   ];
 
   const toggleTransport = (transportId: string) => {
-    setTransport(prev => 
-      prev.includes(transportId) 
+    setTransport(prev =>
+      prev.includes(transportId)
         ? prev.filter(t => t !== transportId)
         : [...prev, transportId]
     );
   };
 
-  const handleSearch = () => {
-    onSearch({
-      destination,
-      startDate,
-      endDate,
-      budget: budget ? parseInt(budget) : null,
-      transport
-    });
+  const handleSearch = async () => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const user_id = user.id;
+
+      const response = await axios.post('http://localhost:1833/api/trips', {
+        user_id,
+        destination,
+        startDate,
+        endDate,
+        budget: budget ? parseInt(budget) : null,
+        transport
+      });
+
+      const tripId = response.data.tripId;
+
+      onSearch({
+        destination,
+        startDate,
+        endDate,
+        budget: budget ? parseInt(budget) : null,
+        transport,
+        tripId,
+        user_id
+      });
+    } catch (error) {
+      console.error("Error creating trip:", error);
+    }
   };
 
   return (
@@ -108,8 +129,8 @@ const TravelSearch = ({ onSearch }: { onSearch: (data: any) => void }) => {
                 key={id}
                 variant={transport.includes(id) ? "default" : "outline"}
                 className={`cursor-pointer p-3 transition-all duration-200 hover:scale-105 ${
-                  transport.includes(id) 
-                    ? "bg-travel-blue hover:bg-travel-blue/90" 
+                  transport.includes(id)
+                    ? "bg-travel-blue hover:bg-travel-blue/90"
                     : "hover:bg-travel-blue/10"
                 }`}
                 onClick={() => toggleTransport(id)}
@@ -122,7 +143,7 @@ const TravelSearch = ({ onSearch }: { onSearch: (data: any) => void }) => {
         </div>
 
         {/* Search Button */}
-        <Button 
+        <Button
           onClick={handleSearch}
           className="w-full h-12 text-lg"
           variant="travel"

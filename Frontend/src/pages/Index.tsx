@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPin, Calendar, Compass, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import TravelSearch from "@/components/TravelSearch";
 import TripPlanner from "@/components/TripPlanner";
 import heroImage from "@/assets/hero-travel.jpg";
+import axios from "axios";
 
 const Index = () => {
   const [currentStep, setCurrentStep] = useState<"search" | "plan">("search");
   const [tripData, setTripData] = useState(null);
+  const [userActivities, setUserActivities] = useState<any[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   const handleSearch = (data: any) => {
     setTripData(data);
@@ -43,38 +46,122 @@ const Index = () => {
     }
   ];
 
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (user?.id) {
+      axios
+        .get(`http://localhost:1833/api/user-activities/${user.id}`)
+        .then((res) => {
+          if (res.data.success) {
+            setUserActivities(res.data.activities);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load activities:", err);
+        })
+        .finally(() => {
+          setActivityLoading(false);
+        });
+    } else {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  // Group activities by destination then by date
+  const groupedActivities = userActivities.reduce((acc, act) => {
+    const { destination, date } = act;
+    if (!acc[destination]) acc[destination] = {};
+    if (!acc[destination][date]) acc[destination][date] = [];
+    acc[destination][date].push(act);
+    return acc;
+  }, {} as Record<string, Record<string, any[]>>);
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {currentStep === "search" ? (
         <>
           {/* Hero Section */}
           <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-            <div 
+            <div
               className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-              style={{
-                backgroundImage: `url(${heroImage})`,
-              }}
+              style={{ backgroundImage: `url(${heroImage})` }}
             >
               <div className="absolute inset-0 bg-gradient-to-b from-background/20 via-background/40 to-background/60"></div>
             </div>
-            
             <div className="relative z-10 container mx-auto px-4 text-center">
               <div className="animate-slide-in space-y-6 mb-12">
                 <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-foreground">
-                  Plan Your Perfect
+                  Plan Your Perfect{" "}
                   <span className="block bg-gradient-hero bg-clip-text text-transparent">
                     Adventure
                   </span>
                 </h1>
                 <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
-                  Create unforgettable journeys with our intelligent travel planner. 
-                  From destinations to detailed itineraries, we've got you covered.
+                  Create unforgettable journeys with our intelligent travel planner. From destinations to detailed itineraries, we've got you covered.
                 </p>
               </div>
-              
               <div className="animate-fade-in">
                 <TravelSearch onSearch={handleSearch} />
               </div>
+            </div>
+          </section>
+
+          {/* Activities Section */}
+          <section className="py-16 bg-background border-t border-muted">
+            <div className="container mx-auto px-4">
+              <h2 className="text-2xl md:text-3xl font-bold text-travel-blue mb-6 text-center">
+                Your Planned Activities
+              </h2>
+
+              {activityLoading ? (
+                <p className="text-center text-muted-foreground">Loading activities...</p>
+              ) : userActivities.length === 0 ? (
+                <p className="text-center text-muted-foreground">No activities found.</p>
+              ) : (
+                Object.entries(groupedActivities).map(([destination, dateGroups]) => (
+                  <div key={destination} className="mb-10">
+                    <h3 className="text-xl font-bold text-foreground mb-4">
+                      Destination: {destination}
+                    </h3>
+                    {Object.entries(dateGroups).map(([date, acts]) => (
+                      <Card key={date} className="mb-4 shadow-card-travel bg-muted/5">
+                        <CardHeader>
+                          <CardTitle className="text-travel-blue">
+                            {formatDate(date)}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {acts.map((act) => (
+                            <div
+                              key={act.id}
+                              className="p-4 border rounded-lg bg-gradient-card"
+                            >
+                              <div className="flex justify-between items-center mb-2">
+                                <h4 className="text-lg font-semibold">{act.activity}</h4>
+                                <span className="text-sm text-muted-foreground">
+                                  ₹{act.estimated_cost}
+                                </span>
+                              </div>
+                              <p className="text-sm text-muted-foreground">Time: {act.time}</p>
+                              <p className="text-sm text-muted-foreground">Location: {act.location}</p>
+                              <p className="text-sm text-muted-foreground">Notes: {act.notes || "N/A"}</p>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ))
+              )}
             </div>
           </section>
 
@@ -89,11 +176,10 @@ const Index = () => {
                   Powerful tools to help you create the perfect travel experience
                 </p>
               </div>
-              
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
                 {features.map((feature, index) => (
-                  <Card 
-                    key={feature.title} 
+                  <Card
+                    key={feature.title}
                     className="text-center shadow-card-travel bg-gradient-card hover:shadow-travel transition-all duration-300 hover:scale-105"
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
@@ -111,26 +197,6 @@ const Index = () => {
                   </Card>
                 ))}
               </div>
-            </div>
-          </section>
-
-          {/* CTA Section */}
-          <section className="py-20 bg-gradient-hero">
-            <div className="container mx-auto px-4 text-center">
-              <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground mb-4">
-                Ready to Start Your Journey?
-              </h2>
-              <p className="text-xl text-primary-foreground/90 mb-8 max-w-2xl mx-auto">
-                Join thousands of travelers who trust our platform to plan their perfect trips
-              </p>
-              <Button 
-                variant="hero" 
-                size="lg" 
-                className="text-lg px-8 py-3"
-                onClick={() => document.querySelector('.container')?.scrollIntoView({ behavior: 'smooth' })}
-              >
-                Start Planning Now
-              </Button>
             </div>
           </section>
         </>
